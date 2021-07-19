@@ -1,5 +1,5 @@
 {
-  "name": "vsip",
+  "name": "@voicenter-team/vsip",
   "version": "1.0.0",
   "description": "A vue based jssip wrapper.",
   "main": "index.js",

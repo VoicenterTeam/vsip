@@ -5,13 +5,13 @@ A vue based jssip wrapper.
 Using npm:
 ```shell
 $ npm i -g npm
-$ npm i vsip
+$ npm i @voicenter-team/vsip
 ```
 
 ## Usage
 Firstly use the lib:
 ```javascript
-import VueJsSIP from 'vsip';
+import VueJsSIP from '@voicenter-team/vsip';
 
 Vue.use(VueJsSIP, {
     store // Vuex store
