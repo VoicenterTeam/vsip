@@ -20,19 +20,19 @@ Vue.use(VueJsSIP, {
 This lib will be injected to your Vex as a `vsip` module.
 
 To init library call `init` action with the following options:
-```json
-{
-  "configuration": {
-    "session_timers": Boolean,
-    "uri": String,
-    "password": String,
+```javascript
+const options = {
+  configuration: {
+    session_timers: Boolean,
+    uri: String,
+    password: String,
   },
-  "socketInterfaces": [String],
-  "sipDomain": String,
-  "sipOptions": {
-    "session_timers": Boolean,
-    "extraHeaders": [String],
-    "pcConfig": {}
+  socketInterfaces: [String],
+  sipDomain: String,
+  sipOptions: {
+    session_timers: Boolean,
+    extraHeaders: [String],
+    pcConfig: {}
   }
 }
 ```
