@@ -1,0 +1,31 @@
+{
+  "name": "vsip",
+  "version": "1.0.0",
+  "description": "A vue based jssip wrapper.",
+  "main": "index.js",
+  "files": [
+    "index.js"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "vue", "vuejs", "vuex", "sip", "jssip"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VoicenterTeam/vsip.git"
+  },
+  "author": "bohdan.konechniy@gmail.com",
+  "bugs": {
+    "url": "https://github.com/VoicenterTeam/vsip/issues"
+  },
+  "homepage": "https://github.com/VoicenterTeam/vsip#readme",
+  "license": "ISC",
+  "dependencies": {
+    "p-iteration": "^1.1.8"
+  },
+  "peerDependencies": {
+    "jssip": "^3.8.0"
+  }
+}
