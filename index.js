@@ -17,12 +17,6 @@ import {forEach} from 'p-iteration';
  * @property {RoomInfo} roomId
  */
 
-/**
- * TODO:
- * 1. List of input/output devices
- * 2. Set currently used input/output device
- */
-
 let UA;
 
 const LISTENER_TYPE = {
