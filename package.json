@@ -23,9 +23,7 @@
   "homepage": "https://github.com/VoicenterTeam/vsip#readme",
   "license": "ISC",
   "dependencies": {
+    "jssip": "git+https://github.com/voicenter/JsSIP.git",
     "p-iteration": "^1.1.8"
-  },
-  "peerDependencies": {
-    "jssip": "^3.8.0"
   }
 }
