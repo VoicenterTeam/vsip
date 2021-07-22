@@ -27,6 +27,12 @@ const LISTENER_TYPE = {
     CALL_ENDED: 'ended'
 }
 
+export const CONSTRAINTS = {
+    CALL_DIRECTION_OUTGOING: 'outgoing',
+    CALL_DIRECTION_INCOMING: 'incoming',
+    CALL_STATUS_UNANSWERED: 0
+}
+
 function simplifyCallObject(call) {
     const keysToInclude = ['roomId', '_audioMuted', '_cancel_reason', '_contact', 'direction', '_end_time', '_eventsCount', '_from_tag', '_id', '_is_canceled', '_is_confirmed', '_late_sdp', '_localHold', '_videoMuted', 'status', 'start_time', '_remote_identity'];
 
@@ -49,6 +55,17 @@ function getNewRoomId(activeRooms) {
     }
 
     return (parseInt(roomIdList.sort()[roomIdList.length - 1]) + 1);
+}
+
+function syncStream(event, call, outputDevice) {
+    const audio = document.createElement('audio');
+
+    audio.id = call._id;
+    audio.class = 'audioTag';
+    audio.srcObject = event.stream;
+    audio.setSinkId(outputDevice);
+    audio.play();
+    call.audioTag = audio;
 }
 
 let activeCalls = {};
@@ -76,6 +93,7 @@ function initStoreModule(options) {
         UPDATE_CALL: 'UPDATE_CALL',
         ADD_LISTENER: 'ADD_LISTENER',
         REMOVE_LISTENER: 'REMOVE_LISTENER',
+        CALL_ADDING_IN_PROGRESS: 'CALL_ADDING_IN_PROGRESS'
     };
 
     options.store.registerModule('vsip', {
@@ -93,9 +111,13 @@ function initStoreModule(options) {
             uaInit: false,
             sipDomain: '',
             sipOptions: {},
-            listeners: {}
+            listeners: {},
+            callAddingInProgress: null,
         },
         mutations: {
+            [types.CALL_ADDING_IN_PROGRESS]: (state, value) => {
+                state.callAddingInProgress = value;
+            },
             [types.ADD_LISTENER]: (state, {type, listener}) => {
                 state.listeners = {
                     ...state.listeners,
@@ -178,10 +200,11 @@ function initStoreModule(options) {
             }
         },
         getters: {
-            getActiveRooms: (state) => state.activeRooms,
-            getActiveCalls: (state) => state.activeCalls,
-            _uaInit: (state) => state.uaInit,
-            getSipDomain: (state) => state.sipDomain,
+            getActiveRooms: state => state.activeRooms,
+            getActiveCalls: state => state.activeCalls,
+            getActiveCallsList: state => Object.values(state.activeCalls),
+            _uaInit: state => state.uaInit,
+            getSipDomain: state => state.sipDomain,
             getSipOptions: (state, getters) => {
                 return {
                     ...state.sipOptions,
@@ -194,11 +217,9 @@ function initStoreModule(options) {
             getOutputDeviceList: (state) => {
                 return state.availableMediaDevices.filter(device => device.kind === 'audiooutput');
             },
-            getCurrentActiveRoomId: (state) => {
-                return state.currentActiveRoomId;
-            },
-            getSelectedInputDevice: (state) => state.selectedMediaDevices.input,
-            getSelectedOutputDevice: (state) => state.selectedMediaDevices.output,
+            getCurrentActiveRoomId: state => state.currentActiveRoomId,
+            getSelectedInputDevice: state => state.selectedMediaDevices.input,
+            getSelectedOutputDevice: state => state.selectedMediaDevices.output,
             getUserMediaConstraints: (state) => {
                 return {
                     audio: {
@@ -209,12 +230,11 @@ function initStoreModule(options) {
                     video: false
                 }
             },
-            getListeners: (state) => {
-                return state.listeners
-            }
+            getListeners: state => state.listeners,
+            callAddingInProgress: state => state.callAddingInProgress
         },
         actions: {
-            async _addCall({commit, getters, dispatch}, session) {
+            async _addCall({commit, getters}, session) {
                 if (Object.keys(getters.getActiveCalls).find(activeSession => activeSession._id === session._id) !== undefined) {
                     return;
                 }
@@ -228,8 +248,6 @@ function initStoreModule(options) {
                 session.roomId = roomId;
                 commit(types.ADD_CALL, session);
                 commit(types.ADD_ROOM, newRoomInfo);
-
-                await dispatch('setCurrentActiveRoom', roomId);
             },
             _activeCallListRemove({commit, dispatch}, {_id}) {
                 const callRoomIdToConfigure = activeCalls[_id].roomId;
@@ -358,7 +376,14 @@ function initStoreModule(options) {
 
                 listener(session, event);
             },
-            async setMediaDevices({commit, dispatch}) {
+            _cancelAllOutgoingUnanswered({getters, dispatch}) {
+                getters.getActiveCallsList.filter(call => {
+                    return call.direction === CONSTRAINTS.CALL_DIRECTION_OUTGOING
+                        && call.status === CONSTRAINTS.CALL_STATUS_UNANSWERED
+                }).forEach(call => dispatch('callTerminate', call._id));
+            },
+            async setMediaDevices({commit, dispatch, getters}) {
+                await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
                 const devices = await navigator.mediaDevices.enumerateDevices();
 
                 commit(types.SET_MEDIA_DEVICES, devices);
@@ -453,18 +478,12 @@ function initStoreModule(options) {
                 }
 
                 const call = UA.call(`sip:${target}@${getters.getSipDomain}`, getters.getSipOptions);
+                commit(types.CALL_ADDING_IN_PROGRESS, call._id);
 
-                call.connection.addEventListener('addstream', e => {
-                    // TODO: do one function
-                    const audio = document.createElement('audio');
+                call.connection.addEventListener('addstream', event => {
+                    syncStream(event, call, getters.getSelectedOutputDevice);
 
-                    audio.id = call._id;
-                    audio.class = 'audioTag';
-                    audio.srcObject = e.stream;
-                    audio.setSinkId(getters.getSelectedOutputDevice);
-                    audio.play();
-                    call.audioTag = audio;
-
+                    commit(types.CALL_ADDING_IN_PROGRESS, null);
                     commit(types.UPDATE_CALL, call);
                 })
             },
@@ -492,23 +511,16 @@ function initStoreModule(options) {
                 call.refer(firstActiveCall.remote_identity._uri.toString(), {'replaces': firstActiveCall});
                 commit(types.UPDATE_CALL, call);
             },
-            callAnswer({commit, getters}, callId) {
+            callAnswer({commit, getters, dispatch}, callId) {
                 const call = activeCalls[callId];
 
+                dispatch('_cancelAllOutgoingUnanswered');
                 call.answer(getters.getSipOptions);
                 commit(types.UPDATE_CALL, call);
+                dispatch('setCurrentActiveRoom', call.roomId);
 
-                call.connection.addEventListener('addstream', (e) => {
-                    // TODO: do one function
-                    const audio = document.createElement('audio');
-
-                    audio.id = call._id;
-                    audio.class = 'audioTag';
-                    audio.srcObject = e.stream;
-                    audio.setSinkId(getters.getSelectedOutputDevice);
-                    audio.play();
-
-                    call.audioTag = audio;
+                call.connection.addEventListener('addstream', event => {
+                    syncStream(event, call, getters.getSelectedOutputDevice);
 
                     commit(types.UPDATE_CALL, call);
                 });
@@ -517,6 +529,8 @@ function initStoreModule(options) {
                 const oldRoomId = activeCalls[callId].roomId;
 
                 activeCalls[callId].roomId = roomId;
+
+                await dispatch('setCurrentActiveRoom', roomId);
 
                 return Promise.all([
                     dispatch('_roomReconfigure', oldRoomId),
@@ -532,7 +546,7 @@ function initStoreModule(options) {
             removeListener({commit}, type) {
                 commit(types.REMOVE_LISTENER, type)
             },
-            init({commit, dispatch}, {configuration, socketInterfaces, listeners = [], sipDomain, sipOptions}) {
+            init({commit, dispatch, getters}, {configuration, socketInterfaces, listeners = [], sipDomain, sipOptions}) {
                 configuration.sockets = socketInterfaces.map(sock => new JsSIP.WebSocketInterface(sock))
 
                 UA = new JsSIP.UA(configuration);
@@ -549,6 +563,11 @@ function initStoreModule(options) {
                         };
                         session._events.failed = function (event) {
                             dispatch('_triggerListener', {listenerType: LISTENER_TYPE.CALL_FAILED, session, event});
+
+                            if (session._id === getters.callAddingInProgress) {
+                                commit(types.CALL_ADDING_IN_PROGRESS, null);
+                            }
+
                             dispatch('_activeCallListRemove', session);
                         };
                         session._events.confirmed = function (event) {
@@ -559,8 +578,8 @@ function initStoreModule(options) {
                         dispatch('_triggerListener', {listenerType: LISTENER_TYPE.NEW_CALL, session});
                         dispatch('_addCall', session);
 
-                        if (session.direction === 'incoming') {
-                            dispatch('playBeep');
+                        if (session.direction === CONSTRAINTS.CALL_DIRECTION_OUTGOING) {
+                            dispatch('setCurrentActiveRoom', session.roomId);
                         }
                     }
                 });
