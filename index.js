@@ -588,5 +588,10 @@ export default {
      */
     install(Vue, options) {
         initStoreModule(options);
-    }
+    },
+    STORAGE_KEYS,
+    STORE_MUTATION_TYPES,
+    CALL_EVENT_LISTENER_TYPE,
+    CONSTRAINTS,
+    CALL_KEYS_TO_INCLUDE
 }
