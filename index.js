@@ -93,9 +93,12 @@ function initStoreModule(options) {
                 state.callAddingInProgress = value;
             },
             [STORE_MUTATION_TYPES.ADD_LISTENER]: (state, {type, listener}) => {
+                const isListenerEmpty = !state.listeners[type] || !state.listeners[type].length
+                const newListeners = isListenerEmpty? [listener]: [...state.listeners[type], listener]
+
                 state.listeners = {
                     ...state.listeners,
-                    [type]: listener
+                    [type]: newListeners
                 }
             },
             [STORE_MUTATION_TYPES.REMOVE_LISTENER]: (state, value) => {
@@ -348,13 +351,15 @@ function initStoreModule(options) {
                 });
             },
             _triggerListener({getters}, {listenerType, session, event}) {
-                const listener = getters.getListeners[listenerType];
+                const listeners = getters.getListeners[listenerType];
 
-                if (!listener) {
+                if (!listeners || !listeners.length) {
                     return
                 }
 
-                listener(session, event);
+                listeners.forEach((listener) => {
+                    listener(session, event);
+                });
             },
             _cancelAllOutgoingUnanswered({getters, dispatch}) {
                 getters.getActiveCallsList.filter(call => {
