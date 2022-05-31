@@ -1,6 +1,14 @@
 import JsSIP from 'jssip';
 import {forEach} from 'p-iteration';
 
+import {
+    STORAGE_KEYS,
+    STORE_MUTATION_TYPES,
+    CALL_EVENT_LISTENER_TYPE,
+    CONSTRAINTS,
+    CALL_KEYS_TO_INCLUDE
+} from './config/enum'
+
 /**
  * @typedef {Object} VSIPOptions
  * @property {Object} store - Vuex store
@@ -19,26 +27,10 @@ import {forEach} from 'p-iteration';
 
 let UA;
 
-const LISTENER_TYPE = {
-    NEW_CALL: 'new_call',
-    CALL_CONFIRMED: 'confirmed',
-    CALL_FAILED: 'failed',
-    CALL_PROGRESS: 'progress',
-    CALL_ENDED: 'ended'
-}
-
-export const CONSTRAINTS = {
-    CALL_DIRECTION_OUTGOING: 'outgoing',
-    CALL_DIRECTION_INCOMING: 'incoming',
-    CALL_STATUS_UNANSWERED: 0
-}
-
 function simplifyCallObject(call) {
-    const keysToInclude = ['roomId', '_audioMuted', '_cancel_reason', '_contact', 'direction', '_end_time', '_eventsCount', '_from_tag', '_id', '_is_canceled', '_is_confirmed', '_late_sdp', '_localHold', '_videoMuted', 'status', 'start_time', '_remote_identity'];
-
     let simplified = {};
 
-    keysToInclude.forEach(key => {
+    CALL_KEYS_TO_INCLUDE.forEach(key => {
         if (call[key] !== undefined) {
             simplified[key] = call[key]
         }
@@ -78,24 +70,6 @@ function initStoreModule(options) {
         throw new Error('Please initialise plugin with a Vuex store.');
     }
 
-    const types = {
-        SET_MEDIA_DEVICES: 'SET_MEDIA_DEVICES',
-        SET_UA_INIT: 'SET_UA_INIT',
-        SET_SELECTED_INPUT_DEVICE: 'SET_SELECTED_INPUT_DEVICE',
-        ADD_CALL: 'ADD_CALL',
-        ADD_ROOM: 'ADD_ROOM',
-        SET_CURRENT_ACTIVE_ROOM_ID: 'SET_CURRENT_ACTIVE_ROOM_ID',
-        REMOVE_ROOM: 'REMOVE_ROOM',
-        REMOVE_CALL: 'REMOVE_CALL',
-        SET_SIP_DOMAIN: 'SET_SIP_DOMAIN',
-        SET_SIP_OPTIONS: 'SET_SIP_OPTIONS',
-        SET_SELECTED_OUTPUT_DEVICE: 'SET_SELECTED_OUTPUT_DEVICE',
-        UPDATE_CALL: 'UPDATE_CALL',
-        ADD_LISTENER: 'ADD_LISTENER',
-        REMOVE_LISTENER: 'REMOVE_LISTENER',
-        CALL_ADDING_IN_PROGRESS: 'CALL_ADDING_IN_PROGRESS'
-    };
-
     options.store.registerModule('vsip', {
         namespaced: true,
         state: {
@@ -104,8 +78,8 @@ function initStoreModule(options) {
             activeRooms: {},
             availableMediaDevices: [],
             selectedMediaDevices: {
-                input: localStorage.getItem('selectedInputDevice') || 'default',
-                output: localStorage.getItem('selectedOutputDevice') || 'default'
+                input: localStorage.getItem(STORAGE_KEYS.SELECTED_INPUT_DEVICE) || 'default',
+                output: localStorage.getItem(STORAGE_KEYS.SELECTED_OUTPUT_DEVICE) || 'default'
             },
             currentActiveRoomId: null,
             uaInit: false,
@@ -115,18 +89,19 @@ function initStoreModule(options) {
             callAddingInProgress: null,
         },
         mutations: {
-            [types.CALL_ADDING_IN_PROGRESS]: (state, value) => {
+            [STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS]: (state, value) => {
                 state.callAddingInProgress = value;
             },
-            [types.ADD_LISTENER]: (state, {type, listener}) => {
+            [STORE_MUTATION_TYPES.ADD_LISTENER]: (state, {type, listener}) => {
                 const isListenerEmpty = !state.listeners[type] || !state.listeners[type].length
                 const newListeners = isListenerEmpty? [listener]: [...state.listeners[type], listener]
+
                 state.listeners = {
                     ...state.listeners,
                     [type]: newListeners
                 }
             },
-            [types.REMOVE_LISTENER]: (state, value) => {
+            [STORE_MUTATION_TYPES.REMOVE_LISTENER]: (state, value) => {
                 const listenersCopy = {...state.listeners};
                 delete listenersCopy[value];
 
@@ -134,29 +109,29 @@ function initStoreModule(options) {
                     ...listenersCopy,
                 }
             },
-            [types.SET_MEDIA_DEVICES]: (state, value) => {
+            [STORE_MUTATION_TYPES.SET_MEDIA_DEVICES]: (state, value) => {
                 state.availableMediaDevices = value;
             },
-            [types.SET_UA_INIT]: (state) => {
+            [STORE_MUTATION_TYPES.SET_UA_INIT]: (state) => {
                 state.uaInit = true
             },
-            [types.SET_SELECTED_INPUT_DEVICE]: (state, value) => {
-                localStorage.setItem('selectedInputDevice', value);
+            [STORE_MUTATION_TYPES.SET_SELECTED_INPUT_DEVICE]: (state, value) => {
+                localStorage.setItem(STORAGE_KEYS.SELECTED_INPUT_DEVICE, value);
 
                 state.selectedMediaDevices.input = value;
             },
-            [types.SET_SELECTED_OUTPUT_DEVICE]: (state, value) => {
-                localStorage.setItem('selectedOutputDevice', value);
+            [STORE_MUTATION_TYPES.SET_SELECTED_OUTPUT_DEVICE]: (state, value) => {
+                localStorage.setItem(STORAGE_KEYS.SELECTED_OUTPUT_DEVICE, value);
 
                 state.selectedMediaDevices.output = value;
             },
-            [types.UPDATE_CALL]: (state, value) => {
+            [STORE_MUTATION_TYPES.UPDATE_CALL]: (state, value) => {
                 state.activeCalls = {
                     ...state.activeCalls,
                     [value._id]: simplifyCallObject(value)
                 }
             },
-            [types.ADD_CALL]: (state, value) => {
+            [STORE_MUTATION_TYPES.ADD_CALL]: (state, value) => {
                 state.activeCalls = {
                     ...state.activeCalls,
                     [value._id]: simplifyCallObject(value)
@@ -164,7 +139,7 @@ function initStoreModule(options) {
 
                 activeCalls[value._id] = value
             },
-            [types.REMOVE_CALL]: (state, value) => {
+            [STORE_MUTATION_TYPES.REMOVE_CALL]: (state, value) => {
                 const stateActiveCallsCopy = {...state.activeCalls};
                 delete stateActiveCallsCopy[value];
 
@@ -177,13 +152,13 @@ function initStoreModule(options) {
              * @param state
              * @param {RoomInfo} value
              */
-            [types.ADD_ROOM]: (state, value) => {
+            [STORE_MUTATION_TYPES.ADD_ROOM]: (state, value) => {
                 state.activeRooms = {
                     ...state.activeRooms,
                     [value.roomId]: value
                 }
             },
-            [types.REMOVE_ROOM]: (state, value) => {
+            [STORE_MUTATION_TYPES.REMOVE_ROOM]: (state, value) => {
                 const activeRoomsCopy = {...state.activeRooms};
                 delete activeRoomsCopy[value];
 
@@ -191,13 +166,13 @@ function initStoreModule(options) {
                     ...activeRoomsCopy,
                 }
             },
-            [types.SET_CURRENT_ACTIVE_ROOM_ID]: (state, value) => {
+            [STORE_MUTATION_TYPES.SET_CURRENT_ACTIVE_ROOM_ID]: (state, value) => {
                 state.currentActiveRoomId = value;
             },
-            [types.SET_SIP_DOMAIN]: (state, value) => {
+            [STORE_MUTATION_TYPES.SET_SIP_DOMAIN]: (state, value) => {
                 state.sipDomain = value
             },
-            [types.SET_SIP_OPTIONS]: (state, value) => {
+            [STORE_MUTATION_TYPES.SET_SIP_OPTIONS]: (state, value) => {
                 state.sipOptions = value
             }
         },
@@ -221,6 +196,12 @@ function initStoreModule(options) {
             },
             getCurrentActiveRoomId: state => state.currentActiveRoomId,
             getSelectedInputDevice: state => state.selectedMediaDevices.input,
+            getInputDefaultDevice: (state, getters) => {
+                  return getters.getInputDeviceList.find(device => device.id === 'default')
+            },
+            getOutputDefaultDevice: (state, getters) => {
+                return getters.getInputDeviceList.find(device => device.id === 'default')
+            },
             getSelectedOutputDevice: state => state.selectedMediaDevices.output,
             getUserMediaConstraints: (state) => {
                 return {
@@ -248,21 +229,21 @@ function initStoreModule(options) {
                 };
 
                 session.roomId = roomId;
-                commit(types.ADD_CALL, session);
-                commit(types.ADD_ROOM, newRoomInfo);
+                commit(STORE_MUTATION_TYPES.ADD_CALL, session);
+                commit(STORE_MUTATION_TYPES.ADD_ROOM, newRoomInfo);
             },
             _activeCallListRemove({commit, dispatch}, {_id}) {
                 const callRoomIdToConfigure = activeCalls[_id].roomId;
-                commit(types.REMOVE_CALL, _id);
+                commit(STORE_MUTATION_TYPES.REMOVE_CALL, _id);
 
                 dispatch('_roomReconfigure', callRoomIdToConfigure);
             },
             _deleteRoomIfEmpty({commit, getters}, roomId) {
                 if (Object.values(activeCalls).filter(call => call.roomId === roomId).length === 0) {
-                    commit(types.REMOVE_ROOM, roomId)
+                    commit(STORE_MUTATION_TYPES.REMOVE_ROOM, roomId)
 
                     if (getters.getCurrentActiveRoomId === roomId) {
-                        commit(types.SET_CURRENT_ACTIVE_ROOM_ID, roomId);
+                        commit(STORE_MUTATION_TYPES.SET_CURRENT_ACTIVE_ROOM_ID, roomId);
                     }
                 }
             },
@@ -278,13 +259,13 @@ function initStoreModule(options) {
                     callsInRoom.forEach(call => {
                         if (call.audioTag) {
                             call.audioTag.muted = false;
-                            commit(types.UPDATE_CALL, call);
+                            commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                         }
                     })
                 } else {
                     callsInRoom.forEach(call => {
                         call.audioTag.muted = true;
-                        commit(types.UPDATE_CALL, call);
+                        commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                     });
                 }
 
@@ -378,7 +359,7 @@ function initStoreModule(options) {
 
                 listeners.forEach((listener) => {
                     listener(session, event);
-                })
+                });
             },
             _cancelAllOutgoingUnanswered({getters, dispatch}) {
                 getters.getActiveCallsList.filter(call => {
@@ -386,14 +367,21 @@ function initStoreModule(options) {
                         && call.status === CONSTRAINTS.CALL_STATUS_UNANSWERED
                 }).forEach(call => dispatch('callTerminate', call._id));
             },
-            async setMediaDevices({commit, dispatch, getters}) {
+            async setMediaDevices({commit, dispatch, getters}, setDefaults = false) {
                 await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
                 const devices = await navigator.mediaDevices.enumerateDevices();
 
-                commit(types.SET_MEDIA_DEVICES, devices);
+                commit(STORE_MUTATION_TYPES.SET_MEDIA_DEVICES, devices);
 
-                dispatch('setMicrophone', '');
-                dispatch('setSpeaker', '');
+                const defaultMicrophone = setDefaults
+                    ? getters.getInputDefaultDevice.id
+                    : ''
+                const defaultSpeaker = setDefaults
+                    ? getters.getOutputDefaultDevice.id
+                    : ''
+
+                dispatch('setMicrophone', defaultMicrophone);
+                dispatch('setSpeaker', defaultSpeaker);
             },
             async setMicrophone({commit, getters, dispatch}, dId) {
                 if (!getters.getInputDeviceList.find(({deviceId}) => deviceId === dId)) {
@@ -408,7 +396,7 @@ function initStoreModule(options) {
                     console.error(err);
                 }
 
-                commit(types.SET_SELECTED_INPUT_DEVICE, dId);
+                commit(STORE_MUTATION_TYPES.SET_SELECTED_INPUT_DEVICE, dId);
 
                 if (Object.keys(getters.getActiveCalls).length === 0) {
                     return;
@@ -419,7 +407,7 @@ function initStoreModule(options) {
                 if (callsInCurrentRoom.length === 1) {
                     Object.values(activeCalls).forEach(call => {
                         call.connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
-                        commit(types.UPDATE_CALL, call);
+                        commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                     });
                 } else {
                     await dispatch('_doConference', callsInCurrentRoom);
@@ -430,7 +418,7 @@ function initStoreModule(options) {
                     return
                 }
 
-                commit(types.SET_SELECTED_OUTPUT_DEVICE, dId);
+                commit(STORE_MUTATION_TYPES.SET_SELECTED_OUTPUT_DEVICE, dId);
 
                 const activeCallList = Object.values(activeCalls);
 
@@ -443,7 +431,7 @@ function initStoreModule(options) {
                 if (callsInCurrentRoom.length === 1) {
                     activeCallList.forEach(call => {
                         call.audioTag.setSinkId(dId);
-                        commit(types.UPDATE_CALL, call);
+                        commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                     });
                 } else {
                     await dispatch('_doConference', callsInCurrentRoom);
@@ -456,7 +444,7 @@ function initStoreModule(options) {
                     return;
                 }
 
-                commit(types.SET_CURRENT_ACTIVE_ROOM_ID, roomId);
+                commit(STORE_MUTATION_TYPES.SET_CURRENT_ACTIVE_ROOM_ID, roomId);
 
                 await dispatch('_roomReconfigure', oldRoomId)
                 await dispatch('_roomReconfigure', roomId)
@@ -470,7 +458,7 @@ function initStoreModule(options) {
                     call.unhold();
                 }
 
-                commit(types.UPDATE_CALL, call);
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
             },
             doCall({getters, commit}, target) {
                 if (!getters._uaInit) {
@@ -482,13 +470,13 @@ function initStoreModule(options) {
                 }
 
                 const call = UA.call(`sip:${target}@${getters.getSipDomain}`, getters.getSipOptions);
-                commit(types.CALL_ADDING_IN_PROGRESS, call._id);
+                commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, call._id);
 
                 call.connection.addEventListener('addstream', event => {
                     syncStream(event, call, getters.getSelectedOutputDevice);
 
-                    commit(types.CALL_ADDING_IN_PROGRESS, null);
-                    commit(types.UPDATE_CALL, call);
+                    commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, null);
+                    commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                 })
             },
             callTerminate(context, callId) {
@@ -506,27 +494,27 @@ function initStoreModule(options) {
                 const call = activeCalls[callId];
 
                 call.refer(`sip:${target}@${getters.getSipDomain}`);
-                commit(types.UPDATE_CALL, call);
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
             },
             callMarge({commit}, callId) {
                 const call = activeCalls[callId];
                 const firstActiveCall = Object.values(activeCalls).filter(c => c._id !== call._id)[0];
 
                 call.refer(firstActiveCall.remote_identity._uri.toString(), {'replaces': firstActiveCall});
-                commit(types.UPDATE_CALL, call);
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
             },
             callAnswer({commit, getters, dispatch}, callId) {
                 const call = activeCalls[callId];
 
                 dispatch('_cancelAllOutgoingUnanswered');
                 call.answer(getters.getSipOptions);
-                commit(types.UPDATE_CALL, call);
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                 dispatch('setCurrentActiveRoom', call.roomId);
 
                 call.connection.addEventListener('addstream', event => {
                     syncStream(event, call, getters.getSelectedOutputDevice);
 
-                    commit(types.UPDATE_CALL, call);
+                    commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                 });
             },
             async callChangeRoom({dispatch}, {callId, roomId}) {
@@ -545,10 +533,10 @@ function initStoreModule(options) {
                 })
             },
             subscribe({commit}, value) {
-                commit(types.ADD_LISTENER, value)
+                commit(STORE_MUTATION_TYPES.ADD_LISTENER, value)
             },
             removeListener({commit}, type) {
-                commit(types.REMOVE_LISTENER, type)
+                commit(STORE_MUTATION_TYPES.REMOVE_LISTENER, type)
             },
             init({commit, dispatch, getters}, {configuration, socketInterfaces, listeners = [], sipDomain, sipOptions}) {
                 configuration.sockets = socketInterfaces.map(sock => new JsSIP.WebSocketInterface(sock))
@@ -559,27 +547,27 @@ function initStoreModule(options) {
                     name: 'newRTCSession',
                     cb: ({session}) => {
                         session._events.ended = function (event) {
-                            dispatch('_triggerListener', {listenerType: LISTENER_TYPE.CALL_ENDED, session, event});
+                            dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_ENDED, session, event});
                             dispatch('_activeCallListRemove', session);
                         };
                         session._events.progress = function (event) {
-                            dispatch('_triggerListener', {listenerType: LISTENER_TYPE.CALL_PROGRESS, session, event});
+                            dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_PROGRESS, session, event});
                         };
                         session._events.failed = function (event) {
-                            dispatch('_triggerListener', {listenerType: LISTENER_TYPE.CALL_FAILED, session, event});
+                            dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_FAILED, session, event});
 
                             if (session._id === getters.callAddingInProgress) {
-                                commit(types.CALL_ADDING_IN_PROGRESS, null);
+                                commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, null);
                             }
 
                             dispatch('_activeCallListRemove', session);
                         };
                         session._events.confirmed = function (event) {
-                            dispatch('_triggerListener', {listenerType: LISTENER_TYPE.CALL_CONFIRMED, session, event});
-                            commit(types.UPDATE_CALL, session);
+                            dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, session, event});
+                            commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
                         };
 
-                        dispatch('_triggerListener', {listenerType: LISTENER_TYPE.NEW_CALL, session});
+                        dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.NEW_CALL, session});
                         dispatch('_addCall', session);
 
                         if (session.direction === CONSTRAINTS.CALL_DIRECTION_OUTGOING) {
@@ -590,9 +578,9 @@ function initStoreModule(options) {
 
                 listeners.forEach(({name, cb}) => UA.on(name, cb));
 
-                commit(types.SET_SIP_DOMAIN, sipDomain);
-                commit(types.SET_SIP_OPTIONS, sipOptions);
-                commit(types.SET_UA_INIT);
+                commit(STORE_MUTATION_TYPES.SET_SIP_DOMAIN, sipDomain);
+                commit(STORE_MUTATION_TYPES.SET_SIP_OPTIONS, sipOptions);
+                commit(STORE_MUTATION_TYPES.SET_UA_INIT);
             }
         }
     });
@@ -605,5 +593,10 @@ export default {
      */
     install(Vue, options) {
         initStoreModule(options);
-    }
+    },
+    STORAGE_KEYS,
+    STORE_MUTATION_TYPES,
+    CALL_EVENT_LISTENER_TYPE,
+    CONSTRAINTS,
+    CALL_KEYS_TO_INCLUDE
 }

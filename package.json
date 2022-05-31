@@ -1,10 +1,11 @@
 {
   "name": "@voicenter-team/vsip",
-  "version": "1.0.3",
+  "version": "1.0.6",
   "description": "A vue based jssip wrapper.",
   "main": "index.js",
   "files": [
-    "index.js"
+    "index.js",
+    "config/enum.js"
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
