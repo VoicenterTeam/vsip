@@ -47,10 +47,13 @@ Then you will be able to use getters and call actions.
 - `doCallHold({callId: Number, toHold: Boolean})` - hold/unhold call by id
 - `doCall(target: String)` - call to the target
 - `callTerminate(callId: Number)` - terminate call
-- `callRefer({callId: Number, target: String})` - transfer call to target
-- `callMarge(callId: Number)` - merge passed call with first active
+- `callTransfer({callId: Number, target: String})` - transfer call to target
+- `callMerge(roomId: Number)` - merge calls in specific room
 - `callAnswer(callId: Number)` - answer the call
+- `doMute(muted: Boolean)` - set the agent muteness
+- `setDND(value: Boolean)` - set the agent "Do not disturb" status
 - `async callChangeRoom({callId: Number, roomId: Number})` - move call to the room
+- `callMove({callId: Number, roomId: Number})` - Same as callChangeRoom. Move call to the specific room
 - `subscribe({type: String, listener: function})` - subscribe to an event. Available events: `new_call`, `ended`, `progress`, `failed`, `confirmed` 
 - `removeListener(type: String)` - remove event listener
 - `init({configuration: Object, socketInterfaces: String[], listeners: Array, sipDomain: String, sipOptions: Object})` - init the lib
@@ -64,3 +67,5 @@ Then you will be able to use getters and call actions.
 - `getCurrentActiveRoomId: Number` - returns current active room id
 - `getSelectedInputDevice: Number` - returns current selected input device
 - `getSelectedOutputDevice: Number` - returns current selected output device
+- `isDND: Boolean` - returns if the agent is in "Do not disturb" status
+- `isMuted: Boolean` - returns if the agent is muted

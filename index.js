@@ -87,8 +87,16 @@ function initStoreModule(options) {
             sipOptions: {},
             listeners: {},
             callAddingInProgress: null,
+            isDND: false,
+            isMuted: false,
         },
         mutations: {
+            [STORE_MUTATION_TYPES.SET_DND]: (state, value) => {
+                state.isDND = value;
+            },
+            [STORE_MUTATION_TYPES.SET_MUTED]: (state, value) => {
+                state.isMuted = value;
+            },
             [STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS]: (state, value) => {
                 state.callAddingInProgress = value;
             },
@@ -197,10 +205,10 @@ function initStoreModule(options) {
             getCurrentActiveRoomId: state => state.currentActiveRoomId,
             getSelectedInputDevice: state => state.selectedMediaDevices.input,
             getInputDefaultDevice: (state, getters) => {
-                  return getters.getInputDeviceList.find(device => device.id === 'default')
+                return getters.getInputDeviceList.find(device => device.id === 'default')
             },
             getOutputDefaultDevice: (state, getters) => {
-                return getters.getInputDeviceList.find(device => device.id === 'default')
+                return getters.getInputDeviceList.find(device => device.id === 'default') // TODO: getOutputDeviceList??
             },
             getSelectedOutputDevice: state => state.selectedMediaDevices.output,
             getUserMediaConstraints: (state) => {
@@ -214,7 +222,9 @@ function initStoreModule(options) {
                 }
             },
             getListeners: state => state.listeners,
-            callAddingInProgress: state => state.callAddingInProgress
+            callAddingInProgress: state => state.callAddingInProgress,
+            isDND: state => state.isDND,
+            isMuted: state => state.isMuted
         },
         actions: {
             async _addCall({commit, getters}, session) {
@@ -247,6 +257,18 @@ function initStoreModule(options) {
                     }
                 }
             },
+            doMute({commit, dispatch, getters}, muted) {
+                const activeRoomId = getters.getCurrentActiveRoomId
+                commit(STORE_MUTATION_TYPES.SET_MUTED, muted);
+                dispatch('_roomReconfigure', activeRoomId)
+            },
+            _muteReconfigure({getters}, call) {
+                if (getters.isMuted) {
+                    call.mute({audio: true})
+                } else {
+                    call.unmute({audio: true})
+                }
+            },
             async _roomReconfigure({commit, getters, dispatch}, roomId) {
                 if (!roomId) {
                     return;
@@ -258,6 +280,7 @@ function initStoreModule(options) {
                 if (getters.getCurrentActiveRoomId === roomId) {
                     callsInRoom.forEach(call => {
                         if (call.audioTag) {
+                            dispatch('_muteReconfigure', call);
                             call.audioTag.muted = false;
                             commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                         }
@@ -289,7 +312,9 @@ function initStoreModule(options) {
                         console.error(err)
                     }
                     if (callsInRoom[0].connection && callsInRoom[0].connection.getSenders()[0]) {
+                        stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
                         await callsInRoom[0].connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
+                        dispatch('_muteReconfigure', callsInRoom[0]);
                     }
                 } else if (callsInRoom.length > 1) {
                     await dispatch('_doConference', callsInRoom);
@@ -346,7 +371,9 @@ function initStoreModule(options) {
                     }
 
                     if (session.connection.getSenders()[0]) {
+                        mixedOutput.stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
                         await session.connection.getSenders()[0].replaceTrack(mixedOutput.stream.getTracks()[0]);
+                        dispatch('_muteReconfigure', session);
                     }
                 });
             },
@@ -406,7 +433,9 @@ function initStoreModule(options) {
 
                 if (callsInCurrentRoom.length === 1) {
                     Object.values(activeCalls).forEach(call => {
+                        stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
                         call.connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
+                        dispatch('_muteReconfigure', call);
                         commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                     });
                 } else {
@@ -449,6 +478,9 @@ function initStoreModule(options) {
                 await dispatch('_roomReconfigure', oldRoomId)
                 await dispatch('_roomReconfigure', roomId)
             },
+            setDND({commit}, value) {
+                commit(STORE_MUTATION_TYPES.SET_DND, value);
+            },
             doCallHold({commit}, {callId, toHold}) {
                 const call = activeCalls[callId];
 
@@ -486,7 +518,7 @@ function initStoreModule(options) {
                     call.terminate();
                 }
             },
-            callRefer({commit, getters}, {callId, target}) {
+            callTransfer({commit, getters}, {callId, target}) {
                 if (target.toString().length === 0) {
                     return console.error('Target must be passed');
                 }
@@ -496,12 +528,18 @@ function initStoreModule(options) {
                 call.refer(`sip:${target}@${getters.getSipDomain}`);
                 commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
             },
-            callMarge({commit}, callId) {
-                const call = activeCalls[callId];
-                const firstActiveCall = Object.values(activeCalls).filter(c => c._id !== call._id)[0];
+            callMerge({commit}, roomId) {
+                const callsInRoom = Object.values(activeCalls).filter((call) => call.roomId === roomId)
+                if (callsInRoom.length !== 2) return
 
-                call.refer(firstActiveCall.remote_identity._uri.toString(), {'replaces': firstActiveCall});
-                commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
+                const firstCall = callsInRoom[0]
+                const secondCall = callsInRoom[1]
+
+                firstCall.refer(secondCall.remote_identity._uri.toString(), {'replaces': secondCall});
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL, firstCall);
+            },
+            async callMove({dispatch}, {callId, roomId}) {
+                await dispatch('callChangeRoom', {callId, roomId})
             },
             callAnswer({commit, getters, dispatch}, callId) {
                 const call = activeCalls[callId];
@@ -546,6 +584,11 @@ function initStoreModule(options) {
                 listeners.push({
                     name: 'newRTCSession',
                     cb: ({session}) => {
+                        if (getters.isDND) {
+                            session.terminate({status_code: 486, reason_phrase: "Do Not Disturb"})
+                            return
+                        }
+
                         session._events.ended = function (event) {
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_ENDED, session, event});
                             dispatch('_activeCallListRemove', session);

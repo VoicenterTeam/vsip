@@ -27,10 +27,12 @@ export const STORE_MUTATION_TYPES = {
     UPDATE_CALL: 'UPDATE_CALL',
     ADD_LISTENER: 'ADD_LISTENER',
     REMOVE_LISTENER: 'REMOVE_LISTENER',
-    CALL_ADDING_IN_PROGRESS: 'CALL_ADDING_IN_PROGRESS'
+    CALL_ADDING_IN_PROGRESS: 'CALL_ADDING_IN_PROGRESS',
+    SET_DND: "SET_DND",
+    SET_MUTED: "SET_MUTED"
 }
 
-export const CALL_KEYS_TO_INCLUDE = ['roomId', '_audioMuted', '_cancel_reason', '_contact', 'direction', '_end_time', '_eventsCount', '_from_tag', '_id', '_is_canceled', '_is_confirmed', '_late_sdp', '_localHold', '_videoMuted', 'status', 'start_time', '_remote_identity']
+export const CALL_KEYS_TO_INCLUDE = ['roomId', '_audioMuted', '_cancel_reason', '_contact', 'direction', '_end_time', '_eventsCount', '_from_tag', '_id', '_is_canceled', '_is_confirmed', '_late_sdp', '_localHold', '_videoMuted', 'status', 'start_time', '_remote_identity', 'audioTag']
 
 export const STORAGE_KEYS = {
     SELECTED_INPUT_DEVICE: 'selectedInputDevice',
