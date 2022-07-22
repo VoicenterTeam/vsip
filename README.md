@@ -50,6 +50,7 @@ Then you will be able to use getters and call actions.
 - `callTransfer({callId: Number, target: String})` - transfer call to target
 - `callMerge(roomId: Number)` - merge calls in specific room
 - `callAnswer(callId: Number)` - answer the call
+- `setMetricConfig(config: Object)` - set the metric config (used for audio quality indicator)
 - `doMute(muted: Boolean)` - set the agent muteness
 - `setDND(value: Boolean)` - set the agent "Do not disturb" status
 - `async callChangeRoom({callId: Number, roomId: Number})` - move call to the room
@@ -69,3 +70,4 @@ Then you will be able to use getters and call actions.
 - `getSelectedOutputDevice: Number` - returns current selected output device
 - `isDND: Boolean` - returns if the agent is in "Do not disturb" status
 - `isMuted: Boolean` - returns if the agent is muted
+- `metricConfig: Object` - returns metric config (used for audio quality indicator)

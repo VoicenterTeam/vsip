@@ -1,5 +1,6 @@
 import JsSIP from 'jssip';
 import {forEach} from 'p-iteration';
+import WebRTCMetrics from "webrtcmetrics";
 
 import {
     STORAGE_KEYS,
@@ -89,10 +90,16 @@ function initStoreModule(options) {
             callAddingInProgress: null,
             isDND: false,
             isMuted: false,
+            metricConfig: {
+                refreshEvery: 1000,   // Optional. Refresh every 3 seconds
+            }
         },
         mutations: {
             [STORE_MUTATION_TYPES.SET_DND]: (state, value) => {
                 state.isDND = value;
+            },
+            [STORE_MUTATION_TYPES.SET_METRIC_CONFIG]: (state, config) => {
+                state.metricConfig = {...state.metricConfig, ...config};
             },
             [STORE_MUTATION_TYPES.SET_MUTED]: (state, value) => {
                 state.isMuted = value;
@@ -224,7 +231,8 @@ function initStoreModule(options) {
             getListeners: state => state.listeners,
             callAddingInProgress: state => state.callAddingInProgress,
             isDND: state => state.isDND,
-            isMuted: state => state.isMuted
+            isMuted: state => state.isMuted,
+            metricConfig: state => state.metricConfig
         },
         actions: {
             async _addCall({commit, getters}, session) {
@@ -492,7 +500,7 @@ function initStoreModule(options) {
 
                 commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
             },
-            doCall({getters, commit}, target) {
+            doCall({dispatch, getters, commit}, target) {
                 if (!getters._uaInit) {
                     return console.error('Run init action first');
                 }
@@ -506,6 +514,7 @@ function initStoreModule(options) {
 
                 call.connection.addEventListener('addstream', event => {
                     syncStream(event, call, getters.getSelectedOutputDevice);
+                    dispatch('_getCallQuality', call);
 
                     commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, null);
                     commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
@@ -551,9 +560,32 @@ function initStoreModule(options) {
 
                 call.connection.addEventListener('addstream', event => {
                     syncStream(event, call, getters.getSelectedOutputDevice);
-
+                    dispatch('_getCallQuality', call);
                     commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                 });
+            },
+            _getCallQuality({dispatch, commit, getters}, call) {
+                const metrics = new WebRTCMetrics(getters.metricConfig);
+                const probe = metrics.createProbe(call.connection, {
+                    cid: call._id
+                });
+
+                probe.onreport = (probe) => {
+                    const values = Object.values(probe.audio).map((audio) => {
+                        return audio.mos_in ? audio.mos_in : audio.mos_out
+                    })
+                    const minValue = Math.min(...values)
+                    call.audioQuality = minValue
+                    commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
+                };
+
+                dispatch('subscribe', {type: CALL_EVENT_LISTENER_TYPE.CALL_ENDED, listener: (session) => {
+                    if (session._id === call._id) {
+                        metrics.stopAllProbes();
+                    }
+                }})
+
+                metrics.startAllProbes();
             },
             async callChangeRoom({dispatch}, {callId, roomId}) {
                 const oldRoomId = activeCalls[callId].roomId;
@@ -624,7 +656,10 @@ function initStoreModule(options) {
                 commit(STORE_MUTATION_TYPES.SET_SIP_DOMAIN, sipDomain);
                 commit(STORE_MUTATION_TYPES.SET_SIP_OPTIONS, sipOptions);
                 commit(STORE_MUTATION_TYPES.SET_UA_INIT);
-            }
+            },
+            setMetricConfig({commit}, config) {
+                commit(STORE_MUTATION_TYPES.SET_METRIC_CONFIG, config);
+            },
         }
     });
 }
