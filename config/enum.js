@@ -32,7 +32,7 @@ export const STORE_MUTATION_TYPES = {
     SET_MUTED: "SET_MUTED"
 }
 
-export const CALL_KEYS_TO_INCLUDE = ['roomId', '_audioMuted', '_cancel_reason', '_contact', 'direction', '_end_time', '_eventsCount', '_from_tag', '_id', '_is_canceled', '_is_confirmed', '_late_sdp', '_localHold', '_videoMuted', 'status', 'start_time', '_remote_identity', 'audioTag', 'audioQuality']
+export const CALL_KEYS_TO_INCLUDE = ['roomId', '_audioMuted', '_cancel_reason', '_contact', 'direction', '_end_time', '_eventsCount', '_from_tag', '_id', '_is_canceled', '_is_confirmed', '_late_sdp', '_localHold', '_videoMuted', 'status', 'start_time', '_remote_identity', 'audioTag', 'audioQuality', 'originalStream']
 
 export const STORAGE_KEYS = {
     SELECTED_INPUT_DEVICE: 'selectedInputDevice',

@@ -1,6 +1,6 @@
 import JsSIP from 'jssip';
 import {forEach} from 'p-iteration';
-import WebRTCMetrics from "webrtcmetrics";
+import WebRTCMetrics from "./helpers/webrtcmetrics/index";
 
 import {
     STORAGE_KEYS,
@@ -277,6 +277,11 @@ function initStoreModule(options) {
                     call.unmute({audio: true})
                 }
             },
+            _setOriginalStream({commit}, {session, stream}) {
+                //stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
+                session.originalStream = stream
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
+            },
             async _roomReconfigure({commit, getters, dispatch}, roomId) {
                 if (!roomId) {
                     return;
@@ -321,6 +326,7 @@ function initStoreModule(options) {
                     }
                     if (callsInRoom[0].connection && callsInRoom[0].connection.getSenders()[0]) {
                         stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
+                        // dispatch('_setOriginalStream', {session: callsInRoom[0], stream})
                         await callsInRoom[0].connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
                         dispatch('_muteReconfigure', callsInRoom[0]);
                     }
@@ -370,15 +376,18 @@ function initStoreModule(options) {
                         });
                     });
 
+                    let stream = null
+
                     if (sessions[0].roomId === getters.getCurrentActiveRoomId) {
                         // Mixing your voice with all the received audio
-                        const stream = await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
+                        stream = await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
                         const sourceStream = audioContext.createMediaStreamSource(stream);
 
                         sourceStream.connect(mixedOutput);
                     }
 
                     if (session.connection.getSenders()[0]) {
+                        // dispatch('_setOriginalStream', {session, stream})
                         mixedOutput.stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
                         await session.connection.getSenders()[0].replaceTrack(mixedOutput.stream.getTracks()[0]);
                         dispatch('_muteReconfigure', session);
@@ -442,6 +451,7 @@ function initStoreModule(options) {
                 if (callsInCurrentRoom.length === 1) {
                     Object.values(activeCalls).forEach(call => {
                         stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
+                        // dispatch('_setOriginalStream', {session: call, stream})
                         call.connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
                         dispatch('_muteReconfigure', call);
                         commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
