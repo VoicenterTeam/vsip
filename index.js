@@ -90,8 +90,9 @@ function initStoreModule(options) {
             callAddingInProgress: null,
             isDND: false,
             isMuted: false,
+            originalStream: null,
             metricConfig: {
-                refreshEvery: 1000,   // Optional. Refresh every 3 seconds
+                refreshEvery: 1000,
             }
         },
         mutations: {
@@ -103,6 +104,9 @@ function initStoreModule(options) {
             },
             [STORE_MUTATION_TYPES.SET_MUTED]: (state, value) => {
                 state.isMuted = value;
+            },
+            [STORE_MUTATION_TYPES.SET_ORIGINAL_STREAM]: (state, value) => {
+                state.originalStream = value;
             },
             [STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS]: (state, value) => {
                 state.callAddingInProgress = value;
@@ -173,6 +177,16 @@ function initStoreModule(options) {
                     [value.roomId]: value
                 }
             },
+            [STORE_MUTATION_TYPES.UPDATE_ROOM]: (state, value) => {
+                const room = state.activeRooms[value.roomId]
+                state.activeRooms = {
+                    ...state.activeRooms,
+                    [value.roomId]: {
+                        ...room,
+                        ...value
+                    }
+                }
+            },
             [STORE_MUTATION_TYPES.REMOVE_ROOM]: (state, value) => {
                 const activeRoomsCopy = {...state.activeRooms};
                 delete activeRoomsCopy[value];
@@ -232,10 +246,11 @@ function initStoreModule(options) {
             callAddingInProgress: state => state.callAddingInProgress,
             isDND: state => state.isDND,
             isMuted: state => state.isMuted,
-            metricConfig: state => state.metricConfig
+            metricConfig: state => state.metricConfig,
+            originalStream: state => state.originalStream
         },
         actions: {
-            async _addCall({commit, getters}, session) {
+            async _addCall({commit, getters, dispatch}, session) {
                 if (Object.keys(getters.getActiveCalls).find(activeSession => activeSession._id === session._id) !== undefined) {
                     return;
                 }
@@ -243,8 +258,27 @@ function initStoreModule(options) {
                 const roomId = getNewRoomId(getters.getActiveRooms);
                 const newRoomInfo = {
                     started: new Date(),
+                    incomingInProgress: false,
                     roomId
                 };
+
+                if (session.direction === CONSTRAINTS.CALL_DIRECTION_INCOMING) {
+                    newRoomInfo["incomingInProgress"] = true;
+
+                    dispatch('subscribe', {type: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, listener: () => {
+                            commit(STORE_MUTATION_TYPES.UPDATE_ROOM, {
+                                incomingInProgress: false,
+                                roomId
+                            });
+                        }})
+
+                    dispatch('subscribe', {type: CALL_EVENT_LISTENER_TYPE.CALL_FAILED, listener: () => {
+                            commit(STORE_MUTATION_TYPES.UPDATE_ROOM, {
+                                incomingInProgress: false,
+                                roomId
+                            });
+                        }})
+                }
 
                 session.roomId = roomId;
                 commit(STORE_MUTATION_TYPES.ADD_CALL, session);
@@ -277,10 +311,13 @@ function initStoreModule(options) {
                     call.unmute({audio: true})
                 }
             },
-            _setOriginalStream({commit}, {session, stream}) {
+            _setOriginalStream({commit}, stream) {
+                // TODO: Fix this method
                 //stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
-                session.originalStream = stream
-                commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
+                commit(STORE_MUTATION_TYPES.SET_ORIGINAL_STREAM, stream);
+                console.log('set new original stream', stream)
+                //session.originalStream = stream
+                //commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
             },
             async _roomReconfigure({commit, getters, dispatch}, roomId) {
                 if (!roomId) {
@@ -326,7 +363,7 @@ function initStoreModule(options) {
                     }
                     if (callsInRoom[0].connection && callsInRoom[0].connection.getSenders()[0]) {
                         stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
-                        // dispatch('_setOriginalStream', {session: callsInRoom[0], stream})
+                        // dispatch('_setOriginalStream', stream) // TODO: Fix this
                         await callsInRoom[0].connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
                         dispatch('_muteReconfigure', callsInRoom[0]);
                     }
@@ -376,18 +413,18 @@ function initStoreModule(options) {
                         });
                     });
 
-                    let stream = null
-
                     if (sessions[0].roomId === getters.getCurrentActiveRoomId) {
                         // Mixing your voice with all the received audio
-                        stream = await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
+                        const stream = await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
                         const sourceStream = audioContext.createMediaStreamSource(stream);
+
+                        // stream.getTracks().forEach(track => track.enabled = !getters.isMuted) // TODO: Fix this
+                        // dispatch('_setOriginalStream', stream) // TODO: Fix this
 
                         sourceStream.connect(mixedOutput);
                     }
 
                     if (session.connection.getSenders()[0]) {
-                        // dispatch('_setOriginalStream', {session, stream})
                         mixedOutput.stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
                         await session.connection.getSenders()[0].replaceTrack(mixedOutput.stream.getTracks()[0]);
                         dispatch('_muteReconfigure', session);
@@ -451,7 +488,7 @@ function initStoreModule(options) {
                 if (callsInCurrentRoom.length === 1) {
                     Object.values(activeCalls).forEach(call => {
                         stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
-                        // dispatch('_setOriginalStream', {session: call, stream})
+                        // dispatch('_setOriginalStream', stream) // TODO: Fix this
                         call.connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
                         dispatch('_muteReconfigure', call);
                         commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
@@ -524,9 +561,10 @@ function initStoreModule(options) {
 
                 call.connection.addEventListener('addstream', event => {
                     syncStream(event, call, getters.getSelectedOutputDevice);
+                    console.log('IN doCall CALL_ADDING_IN_PROGRESS null')
                     dispatch('_getCallQuality', call);
 
-                    commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, null);
+                    commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, null); // TODO: comment
                     commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                 })
             },
@@ -632,13 +670,16 @@ function initStoreModule(options) {
                         }
 
                         session._events.ended = function (event) {
+                            console.log('QQQ Call ended')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_ENDED, session, event});
                             dispatch('_activeCallListRemove', session);
                         };
                         session._events.progress = function (event) {
+                            console.log('QQQ Call in progress')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_PROGRESS, session, event});
                         };
                         session._events.failed = function (event) {
+                            console.log('QQQ Call failed')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_FAILED, session, event});
 
                             if (session._id === getters.callAddingInProgress) {
@@ -648,10 +689,12 @@ function initStoreModule(options) {
                             dispatch('_activeCallListRemove', session);
                         };
                         session._events.confirmed = function (event) {
+                            console.log('QQQ Call Confirmed')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, session, event});
                             commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
                         };
 
+                        console.log('QQQ Add New Call')
                         dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.NEW_CALL, session});
                         dispatch('_addCall', session);
 
