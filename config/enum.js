@@ -17,6 +17,7 @@ export const STORE_MUTATION_TYPES = {
     SET_UA_INIT: 'SET_UA_INIT',
     SET_SELECTED_INPUT_DEVICE: 'SET_SELECTED_INPUT_DEVICE',
     ADD_CALL: 'ADD_CALL',
+    ADD_CALL_TIME: 'ADD_CALL_TIME',
     ADD_ROOM: 'ADD_ROOM',
     UPDATE_ROOM: 'UPDATE_ROOM',
     SET_CURRENT_ACTIVE_ROOM_ID: 'SET_CURRENT_ACTIVE_ROOM_ID',
@@ -35,7 +36,7 @@ export const STORE_MUTATION_TYPES = {
     SET_ORIGINAL_STREAM: "SET_ORIGINAL_STREAM"
 }
 
-export const CALL_KEYS_TO_INCLUDE = ['roomId', '_audioMuted', '_cancel_reason', '_contact', 'direction', '_end_time', '_eventsCount', '_from_tag', '_id', '_is_canceled', '_is_confirmed', '_late_sdp', '_localHold', '_videoMuted', 'status', 'start_time', '_remote_identity', 'audioTag', 'audioQuality', 'isOnHold']
+export const CALL_KEYS_TO_INCLUDE = ['roomId', '_audioMuted', '_cancel_reason', '_contact', 'direction', '_end_time', '_eventsCount', '_from_tag', '_id', '_is_canceled', '_is_confirmed', '_late_sdp', '_localHold', '_videoMuted', 'status', 'start_time', '_remote_identity', 'audioTag', 'audioQuality', 'isOnHold', 'localMuted']
 
 export const STORAGE_KEYS = {
     SELECTED_INPUT_DEVICE: 'selectedInputDevice',

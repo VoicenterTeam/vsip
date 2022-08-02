@@ -93,7 +93,8 @@ function initStoreModule(options) {
             originalStream: null,
             metricConfig: {
                 refreshEvery: 1000,
-            }
+            },
+            callTime: {}
         },
         mutations: {
             [STORE_MUTATION_TYPES.SET_DND]: (state, value) => {
@@ -165,6 +166,12 @@ function initStoreModule(options) {
                 delete activeCalls[value];
                 state.activeCalls = {
                     ...stateActiveCallsCopy,
+                }
+            },
+            [STORE_MUTATION_TYPES.ADD_CALL_TIME]: (state, callId) => {
+                state.callTime = {
+                    ...state.callTime,
+                    [callId]: callId
                 }
             },
             /**
@@ -281,8 +288,12 @@ function initStoreModule(options) {
                 }
 
                 session.roomId = roomId;
+                session.localMuted = false;
                 commit(STORE_MUTATION_TYPES.ADD_CALL, session);
                 commit(STORE_MUTATION_TYPES.ADD_ROOM, newRoomInfo);
+            },
+            _startCallTimer({commit}, callId) { // TODO: complete implementation
+                // commit(STORE_MUTATION_TYPES.ADD_CALL_TIME, session);
             },
             _activeCallListRemove({commit, dispatch}, {_id}) {
                 const callRoomIdToConfigure = activeCalls[_id].roomId;
@@ -318,6 +329,18 @@ function initStoreModule(options) {
                 console.log('set new original stream', stream)
                 //session.originalStream = stream
                 //commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
+            },
+            muteCaller({commit, getters, dispatch}, {callId, value}) {
+                const call = Object.values(activeCalls).find(call => call._id === callId);
+
+                if (call && call.connection.getReceivers().length) {
+                    call.localMuted = value
+                    call.connection.getReceivers().forEach(receiver => {
+                        receiver.track.enabled = !value
+                    });
+                    commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
+                    dispatch('_roomReconfigure', call.roomId)
+                }
             },
             async _roomReconfigure({commit, getters, dispatch}, roomId) {
                 if (!roomId) {
@@ -564,7 +587,6 @@ function initStoreModule(options) {
                     console.log('IN doCall CALL_ADDING_IN_PROGRESS null')
                     dispatch('_getCallQuality', call);
 
-                    commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, null); // TODO: comment
                     commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                 })
             },
@@ -669,6 +691,8 @@ function initStoreModule(options) {
                             return
                         }
 
+                        // stop timers on ended and failed
+
                         session._events.ended = function (event) {
                             console.log('QQQ Call ended')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_ENDED, session, event});
@@ -692,6 +716,10 @@ function initStoreModule(options) {
                             console.log('QQQ Call Confirmed')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, session, event});
                             commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
+
+                            if (session._id === getters.callAddingInProgress) {
+                                commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, null);
+                            }
                         };
 
                         console.log('QQQ Add New Call')
