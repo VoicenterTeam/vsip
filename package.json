@@ -1,11 +1,12 @@
 {
   "name": "@voicenter-team/vsip",
-  "version": "1.0.9",
+  "version": "1.0.39",
   "description": "A vue based jssip wrapper.",
   "main": "index.js",
   "files": [
     "index.js",
-    "config/enum.js"
+    "config/enum.js",
+    "helpers"
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -28,9 +29,10 @@
   "homepage": "https://github.com/VoicenterTeam/vsip#readme",
   "license": "ISC",
   "dependencies": {
+    "generate-unique-id": "^2.0.1",
     "jssip": "^3.4.0",
-    "p-iteration": "^1.1.8",
-    "webrtcmetrics": "^5.0.3"
+    "loglevel": "^1.7.1",
+    "p-iteration": "^1.1.8"
   },
   "devDependencies": {
     "eslint": "^6.7.2",
