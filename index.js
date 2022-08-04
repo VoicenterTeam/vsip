@@ -1,6 +1,7 @@
 import JsSIP from 'jssip';
 import {forEach} from 'p-iteration';
 import WebRTCMetrics from "./helpers/webrtcmetrics/index";
+import {setupTime} from "./helpers/time.helper"
 
 import {
     STORAGE_KEYS,
@@ -95,7 +96,8 @@ function initStoreModule(options) {
                 refreshEvery: 1000,
             },
             callTime: {},
-            callStatus: {}
+            callStatus: {},
+            timeIntervals: {}
         },
         mutations: {
             [STORE_MUTATION_TYPES.SET_DND]: (state, value) => {
@@ -169,10 +171,36 @@ function initStoreModule(options) {
                     ...stateActiveCallsCopy,
                 }
             },
-            [STORE_MUTATION_TYPES.ADD_CALL_TIME]: (state, callId) => {
+            [STORE_MUTATION_TYPES.SET_CALL_TIME]: (state, value) => {
+                const time = { ...value }
+                delete time['callId']
+
                 state.callTime = {
                     ...state.callTime,
-                    [callId]: callId
+                    [value.callId]: time
+                }
+            },
+            [STORE_MUTATION_TYPES.REMOVE_CALL_TIME]: (state, callId) => {
+                const callTimeCopy = {...state.callTime};
+                delete callTimeCopy[callId];
+
+                state.callTime = {
+                    ...callTimeCopy,
+                }
+            },
+            [STORE_MUTATION_TYPES.SET_TIME_INTERVAL]: (state, {callId, interval}) => {
+                state.timeIntervals = {
+                    ...state.timeIntervals,
+                    [callId]: interval
+                }
+            },
+            [STORE_MUTATION_TYPES.REMOVE_TIME_INTERVAL]: (state, callId) => {
+                const timeIntervalsCopy = {...state.timeIntervals};
+                clearInterval(timeIntervalsCopy[callId]);
+                delete timeIntervalsCopy[callId];
+
+                state.timeIntervals = {
+                    ...timeIntervalsCopy,
                 }
             },
             [STORE_MUTATION_TYPES.ADD_CALL_STATUS]: (state, callId) => {
@@ -278,7 +306,8 @@ function initStoreModule(options) {
             isMuted: state => state.isMuted,
             metricConfig: state => state.metricConfig,
             originalStream: state => state.originalStream,
-            callStatus: state => state.callStatus
+            callStatus: state => state.callStatus,
+            callTime: state => state.callTime
         },
         actions: {
             async _addCall({commit, getters, dispatch}, session) {
@@ -296,19 +325,26 @@ function initStoreModule(options) {
                 if (session.direction === CONSTRAINTS.CALL_DIRECTION_INCOMING) {
                     newRoomInfo["incomingInProgress"] = true;
 
-                    dispatch('subscribe', {type: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, listener: () => {
-                            commit(STORE_MUTATION_TYPES.UPDATE_ROOM, {
-                                incomingInProgress: false,
-                                roomId
-                            });
+                    dispatch('subscribe', {type: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, listener: (call) => {
+                            if (session._id === call._id) {
+                                commit(STORE_MUTATION_TYPES.UPDATE_ROOM, {
+                                    incomingInProgress: false,
+                                    roomId
+                                });
+                                dispatch('_startCallTimer', session._id);
+                            }
                         }})
 
-                    dispatch('subscribe', {type: CALL_EVENT_LISTENER_TYPE.CALL_FAILED, listener: () => {
-                            commit(STORE_MUTATION_TYPES.UPDATE_ROOM, {
-                                incomingInProgress: false,
-                                roomId
-                            });
+                    dispatch('subscribe', {type: CALL_EVENT_LISTENER_TYPE.CALL_FAILED, listener: (call) => {
+                            if (session._id === call._id) {
+                                commit(STORE_MUTATION_TYPES.UPDATE_ROOM, {
+                                    incomingInProgress: false,
+                                    roomId
+                                });
+                            }
                         }})
+                } else if (session.direction === CONSTRAINTS.CALL_DIRECTION_OUTGOING) {
+                    dispatch('_startCallTimer', session._id);
                 }
 
                 session.roomId = roomId;
@@ -317,8 +353,27 @@ function initStoreModule(options) {
                 commit(STORE_MUTATION_TYPES.ADD_CALL_STATUS, session._id);
                 commit(STORE_MUTATION_TYPES.ADD_ROOM, newRoomInfo);
             },
-            _startCallTimer({commit}, callId) { // TODO: complete implementation
-                // commit(STORE_MUTATION_TYPES.ADD_CALL_TIME, session);
+            _startCallTimer({commit, getters}, callId) {
+                const timeData = {
+                    callId,
+                    hours: 0,
+                    minutes: 0,
+                    seconds: 0,
+                    formatted: ''
+                }
+                commit(STORE_MUTATION_TYPES.SET_CALL_TIME, timeData);
+
+                const interval = setInterval(() => {
+                    const callTime = { ...getters.callTime[callId] };
+                    const updatedTime = setupTime(callTime)
+                    commit(STORE_MUTATION_TYPES.SET_CALL_TIME, { callId, ...updatedTime });
+                }, 1000)
+
+                commit(STORE_MUTATION_TYPES.SET_TIME_INTERVAL, { callId, interval });
+            },
+            _stopCallTimer({commit, getters}, callId) {
+                commit(STORE_MUTATION_TYPES.REMOVE_TIME_INTERVAL, callId);
+                commit(STORE_MUTATION_TYPES.REMOVE_CALL_TIME, callId);
             },
             _activeCallListRemove({commit, dispatch}, {_id}) {
                 const callRoomIdToConfigure = activeCalls[_id].roomId;
@@ -348,12 +403,7 @@ function initStoreModule(options) {
                 }
             },
             _setOriginalStream({commit}, stream) {
-                // TODO: Fix this method
-                //stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
                 commit(STORE_MUTATION_TYPES.SET_ORIGINAL_STREAM, stream);
-                console.log('set new original stream', stream)
-                //session.originalStream = stream
-                //commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
             },
             muteCaller({commit, getters, dispatch}, {callId, value}) {
                 const call = activeCalls[callId];
@@ -724,16 +774,14 @@ function initStoreModule(options) {
                         // stop timers on ended and failed
 
                         session._events.ended = function (event) {
-                            console.log('QQQ Call ended')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_ENDED, session, event});
                             dispatch('_activeCallListRemove', session);
+                            dispatch('_stopCallTimer', session._id);
                         };
                         session._events.progress = function (event) {
-                            console.log('QQQ Call in progress')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_PROGRESS, session, event});
                         };
                         session._events.failed = function (event) {
-                            console.log('QQQ Call failed')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_FAILED, session, event});
 
                             if (session._id === getters.callAddingInProgress) {
@@ -741,9 +789,9 @@ function initStoreModule(options) {
                             }
 
                             dispatch('_activeCallListRemove', session);
+                            dispatch('_stopCallTimer', session._id);
                         };
                         session._events.confirmed = function (event) {
-                            console.log('QQQ Call Confirmed')
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, session, event});
                             commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
 
@@ -752,7 +800,6 @@ function initStoreModule(options) {
                             }
                         };
 
-                        console.log('QQQ Add New Call')
                         dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.NEW_CALL, session});
                         dispatch('_addCall', session);
 
