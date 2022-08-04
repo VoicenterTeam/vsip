@@ -94,7 +94,8 @@ function initStoreModule(options) {
             metricConfig: {
                 refreshEvery: 1000,
             },
-            callTime: {}
+            callTime: {},
+            callStatus: {}
         },
         mutations: {
             [STORE_MUTATION_TYPES.SET_DND]: (state, value) => {
@@ -174,6 +175,28 @@ function initStoreModule(options) {
                     [callId]: callId
                 }
             },
+            [STORE_MUTATION_TYPES.ADD_CALL_STATUS]: (state, callId) => {
+                state.callStatus = {
+                    ...state.callStatus,
+                    [callId]: {
+                        isMoving: false,
+                        isTransferring: false
+                    }
+                }
+            },
+            [STORE_MUTATION_TYPES.UPDATE_CALL_STATUS]: (state, value) => {
+                const prevStatus = state.callStatus[value.callId]
+                const newStatus = { ...value }
+                delete newStatus['callId']
+
+                state.callStatus = {
+                    ...state.callStatus,
+                    [value.callId]: {
+                        ...prevStatus,
+                        ...newStatus
+                    }
+                }
+            },
             /**
              * @param state
              * @param {RoomInfo} value
@@ -236,7 +259,7 @@ function initStoreModule(options) {
                 return getters.getInputDeviceList.find(device => device.id === 'default')
             },
             getOutputDefaultDevice: (state, getters) => {
-                return getters.getInputDeviceList.find(device => device.id === 'default') // TODO: getOutputDeviceList??
+                return getters.getOutputDeviceList.find(device => device.id === 'default')
             },
             getSelectedOutputDevice: state => state.selectedMediaDevices.output,
             getUserMediaConstraints: (state) => {
@@ -254,7 +277,8 @@ function initStoreModule(options) {
             isDND: state => state.isDND,
             isMuted: state => state.isMuted,
             metricConfig: state => state.metricConfig,
-            originalStream: state => state.originalStream
+            originalStream: state => state.originalStream,
+            callStatus: state => state.callStatus
         },
         actions: {
             async _addCall({commit, getters, dispatch}, session) {
@@ -290,6 +314,7 @@ function initStoreModule(options) {
                 session.roomId = roomId;
                 session.localMuted = false;
                 commit(STORE_MUTATION_TYPES.ADD_CALL, session);
+                commit(STORE_MUTATION_TYPES.ADD_CALL_STATUS, session._id);
                 commit(STORE_MUTATION_TYPES.ADD_ROOM, newRoomInfo);
             },
             _startCallTimer({commit}, callId) { // TODO: complete implementation
@@ -331,7 +356,7 @@ function initStoreModule(options) {
                 //commit(STORE_MUTATION_TYPES.UPDATE_CALL, session);
             },
             muteCaller({commit, getters, dispatch}, {callId, value}) {
-                const call = Object.values(activeCalls).find(call => call._id === callId);
+                const call = activeCalls[callId];
 
                 if (call && call.connection.getReceivers().length) {
                     call.localMuted = value
@@ -370,10 +395,10 @@ function initStoreModule(options) {
                     dispatch('_deleteRoomIfEmpty', roomId);
                 } else if (callsInRoom.length === 1 && getters.getCurrentActiveRoomId !== roomId) {
                     if (!callsInRoom[0]._localHold) {
-                        dispatch('doCallHold', {callId: callsInRoom[0]._id, toHold: true})
+                        dispatch('doCallHold', {callId: callsInRoom[0]._id, toHold: true, automatic: true})
                     }
                 } else if (callsInRoom.length === 1 && getters.getCurrentActiveRoomId === roomId) {
-                    if (callsInRoom[0]._localHold) {
+                    if (callsInRoom[0]._localHold && callsInRoom[0]._automaticHold) {
                         dispatch('doCallHold', {callId: callsInRoom[0]._id, toHold: false})
                     }
 
@@ -386,7 +411,7 @@ function initStoreModule(options) {
                     }
                     if (callsInRoom[0].connection && callsInRoom[0].connection.getSenders()[0]) {
                         stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
-                        // dispatch('_setOriginalStream', stream) // TODO: Fix this
+                        dispatch('_setOriginalStream', stream);
                         await callsInRoom[0].connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
                         dispatch('_muteReconfigure', callsInRoom[0]);
                     }
@@ -439,16 +464,17 @@ function initStoreModule(options) {
                     if (sessions[0].roomId === getters.getCurrentActiveRoomId) {
                         // Mixing your voice with all the received audio
                         const stream = await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
+                        stream.getTracks().forEach(track => track.enabled = !getters.isMuted);
+                        dispatch('_setOriginalStream', stream);
                         const sourceStream = audioContext.createMediaStreamSource(stream);
 
                         // stream.getTracks().forEach(track => track.enabled = !getters.isMuted) // TODO: Fix this
-                        // dispatch('_setOriginalStream', stream) // TODO: Fix this
 
                         sourceStream.connect(mixedOutput);
                     }
 
                     if (session.connection.getSenders()[0]) {
-                        mixedOutput.stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
+                        //mixedOutput.stream.getTracks().forEach(track => track.enabled = !getters.isMuted) // Uncomment to mute all callers on mute
                         await session.connection.getSenders()[0].replaceTrack(mixedOutput.stream.getTracks()[0]);
                         dispatch('_muteReconfigure', session);
                     }
@@ -511,7 +537,7 @@ function initStoreModule(options) {
                 if (callsInCurrentRoom.length === 1) {
                     Object.values(activeCalls).forEach(call => {
                         stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
-                        // dispatch('_setOriginalStream', stream) // TODO: Fix this
+                        dispatch('_setOriginalStream', stream);
                         call.connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
                         dispatch('_muteReconfigure', call);
                         commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
@@ -559,8 +585,9 @@ function initStoreModule(options) {
             setDND({commit}, value) {
                 commit(STORE_MUTATION_TYPES.SET_DND, value);
             },
-            doCallHold({commit}, {callId, toHold}) {
+            doCallHold({commit}, {callId, toHold, automatic}) {
                 const call = activeCalls[callId];
+                call._automaticHold = automatic || false;
 
                 if (toHold) {
                     call.hold();
@@ -584,7 +611,6 @@ function initStoreModule(options) {
 
                 call.connection.addEventListener('addstream', event => {
                     syncStream(event, call, getters.getSelectedOutputDevice);
-                    console.log('IN doCall CALL_ADDING_IN_PROGRESS null')
                     dispatch('_getCallQuality', call);
 
                     commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
@@ -602,6 +628,8 @@ function initStoreModule(options) {
                     return console.error('Target must be passed');
                 }
 
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId, isTransferring: true });
+
                 const call = activeCalls[callId];
 
                 call.refer(`sip:${target}@${getters.getSipDomain}`);
@@ -617,8 +645,10 @@ function initStoreModule(options) {
                 firstCall.refer(secondCall.remote_identity._uri.toString(), {'replaces': secondCall});
                 commit(STORE_MUTATION_TYPES.UPDATE_CALL, firstCall);
             },
-            async callMove({dispatch}, {callId, roomId}) {
+            async callMove({dispatch, commit}, {callId, roomId}) {
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId, isMoving: true });
                 await dispatch('callChangeRoom', {callId, roomId})
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId, isMoving: false });
             },
             callAnswer({commit, getters, dispatch}, callId) {
                 const call = activeCalls[callId];
