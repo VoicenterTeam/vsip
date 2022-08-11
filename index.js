@@ -208,7 +208,8 @@ function initStoreModule(options) {
                     ...state.callStatus,
                     [callId]: {
                         isMoving: false,
-                        isTransferring: false
+                        isTransferring: false,
+                        isMerging: false
                     }
                 }
             },
@@ -223,6 +224,14 @@ function initStoreModule(options) {
                         ...prevStatus,
                         ...newStatus
                     }
+                }
+            },
+            [STORE_MUTATION_TYPES.REMOVE_CALL_STATUS]: (state, callId) => {
+                const callStatusCopy = {...state.callStatus};
+                delete callStatusCopy[callId];
+
+                state.callStatus = {
+                    ...callStatusCopy,
                 }
             },
             /**
@@ -647,7 +656,9 @@ function initStoreModule(options) {
 
                 commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
             },
-            doCall({dispatch, getters, commit}, target) {
+            doCall({dispatch, getters, commit}, {target, addToCurrentRoom = false}) {
+                const activeRoomId = getters.getCurrentActiveRoomId
+
                 if (!getters._uaInit) {
                     return console.error('Run init action first');
                 }
@@ -658,6 +669,10 @@ function initStoreModule(options) {
 
                 const call = UA.call(`sip:${target}@${getters.getSipDomain}`, getters.getSipOptions);
                 commit(STORE_MUTATION_TYPES.CALL_ADDING_IN_PROGRESS, call._id);
+
+                if (addToCurrentRoom && activeRoomId) {
+                    dispatch('callChangeRoom', {callId: call._id, roomId: activeRoomId})
+                }
 
                 call.connection.addEventListener('addstream', event => {
                     syncStream(event, call, getters.getSelectedOutputDevice);
@@ -692,6 +707,27 @@ function initStoreModule(options) {
                 const firstCall = callsInRoom[0]
                 const secondCall = callsInRoom[1]
 
+                if (!firstCall || !secondCall) {
+                    return
+                }
+
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId: firstCall._id, isMerging: true });
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId: secondCall._id, isMerging: true });
+
+                firstCall.refer(secondCall.remote_identity._uri.toString(), {'replaces': secondCall});
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL, firstCall);
+            },
+            callMergeByIds({commit}, {firstCallId, secondCallId}) {
+                const firstCall = Object.values(activeCalls).find((call) => call._id === firstCallId)
+                const secondCall = Object.values(activeCalls).find((call) => call._id === secondCallId)
+
+                if (!firstCall || !secondCall) {
+                    return
+                }
+
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId: firstCall._id, isMerging: true });
+                commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId: secondCall._id, isMerging: true });
+
                 firstCall.refer(secondCall.remote_identity._uri.toString(), {'replaces': secondCall});
                 commit(STORE_MUTATION_TYPES.UPDATE_CALL, firstCall);
             },
@@ -699,6 +735,14 @@ function initStoreModule(options) {
                 commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId, isMoving: true });
                 await dispatch('callChangeRoom', {callId, roomId})
                 commit(STORE_MUTATION_TYPES.UPDATE_CALL_STATUS, { callId, isMoving: false });
+            },
+            sendDTMF({dispatch, commit}, {callId, value}) {
+                const validation_regex = /^[A-D0-9\#\*]+$/g
+                if (!validation_regex.test(value)) {
+                    throw new Error('Not allowed character in DTMF input')
+                }
+                const call = activeCalls[callId];
+                call.sendDTMF(value);
             },
             callAnswer({commit, getters, dispatch}, callId) {
                 const call = activeCalls[callId];
@@ -777,6 +821,7 @@ function initStoreModule(options) {
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_ENDED, session, event});
                             dispatch('_activeCallListRemove', session);
                             dispatch('_stopCallTimer', session._id);
+                            commit(STORE_MUTATION_TYPES.REMOVE_CALL_STATUS, session._id);
                         };
                         session._events.progress = function (event) {
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_PROGRESS, session, event});
@@ -790,6 +835,7 @@ function initStoreModule(options) {
 
                             dispatch('_activeCallListRemove', session);
                             dispatch('_stopCallTimer', session._id);
+                            commit(STORE_MUTATION_TYPES.REMOVE_CALL_STATUS, session._id);
                         };
                         session._events.confirmed = function (event) {
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, session, event});
