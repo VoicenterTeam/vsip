@@ -1,6 +1,6 @@
 {
   "name": "@voicenter-team/vsip",
-  "version": "1.1.0",
+  "version": "1.1.7",
   "description": "A vue based jssip wrapper.",
   "main": "index.js",
   "files": [
