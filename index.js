@@ -2,13 +2,15 @@ import JsSIP from 'jssip';
 import {forEach} from 'p-iteration';
 import WebRTCMetrics from "./helpers/webrtcmetrics/index";
 import {setupTime} from "./helpers/time.helper"
+import {filterObjectkeys} from "./helpers/filter.helper";
 
 import {
     STORAGE_KEYS,
     STORE_MUTATION_TYPES,
     CALL_EVENT_LISTENER_TYPE,
     CONSTRAINTS,
-    CALL_KEYS_TO_INCLUDE
+    CALL_KEYS_TO_INCLUDE,
+    METRIC_KEYS_TO_INCLUDE
 } from './config/enum'
 
 /**
@@ -51,15 +53,28 @@ function getNewRoomId(activeRooms) {
     return (parseInt(roomIdList.sort()[roomIdList.length - 1]) + 1);
 }
 
-function syncStream(event, call, outputDevice) {
+function syncStream(event, call, outputDevice, volume) {
     const audio = document.createElement('audio');
 
     audio.id = call._id;
     audio.class = 'audioTag';
     audio.srcObject = event.stream;
     audio.setSinkId(outputDevice);
+    audio.volume = volume;
     audio.play();
     call.audioTag = audio;
+}
+
+function processAudioVolume(stream, volume) {
+    let audioContext = new AudioContext()
+    let audioSource = audioContext.createMediaStreamSource(stream)
+    let audioDestination = audioContext.createMediaStreamDestination();
+    let gainNode = audioContext.createGain();
+    audioSource.connect(gainNode);
+    gainNode.connect(audioDestination);
+    gainNode.gain.value = volume;
+
+    return audioDestination.stream
 }
 
 let activeCalls = {};
@@ -92,10 +107,13 @@ function initStoreModule(options) {
             isDND: false,
             isMuted: false,
             originalStream: null,
+            microphoneInputLevel: 2, // from 0 to 2
+            speakerVolume: 1, // from 0 to 1
             metricConfig: {
                 refreshEvery: 1000,
             },
             callTime: {},
+            callMetrics: {},
             callStatus: {},
             timeIntervals: {}
         },
@@ -147,6 +165,12 @@ function initStoreModule(options) {
                 localStorage.setItem(STORAGE_KEYS.SELECTED_OUTPUT_DEVICE, value);
 
                 state.selectedMediaDevices.output = value;
+            },
+            [STORE_MUTATION_TYPES.SET_MICROPHONE_INPUT_LEVEL]: (state, value) => {
+                state.microphoneInputLevel = value;
+            },
+            [STORE_MUTATION_TYPES.SET_SPEAKER_VOLUME]: (state, value) => {
+                state.speakerVolume = value;
             },
             [STORE_MUTATION_TYPES.UPDATE_CALL]: (state, value) => {
                 state.activeCalls = {
@@ -201,6 +225,23 @@ function initStoreModule(options) {
 
                 state.timeIntervals = {
                     ...timeIntervalsCopy,
+                }
+            },
+            [STORE_MUTATION_TYPES.SET_CALL_METRICS]: (state, value) => {
+                const metrics = { ...value }
+                delete metrics['callId']
+
+                state.callMetrics = {
+                    ...state.callMetrics,
+                    [value.callId]: metrics
+                }
+            },
+            [STORE_MUTATION_TYPES.REMOVE_CALL_METRICS]: (state, callId) => {
+                const callMetricsCopy = {...state.callMetrics};
+                delete callMetricsCopy[callId];
+
+                state.callMetrics = {
+                    ...callMetricsCopy,
                 }
             },
             [STORE_MUTATION_TYPES.ADD_CALL_STATUS]: (state, callId) => {
@@ -315,8 +356,11 @@ function initStoreModule(options) {
             isMuted: state => state.isMuted,
             metricConfig: state => state.metricConfig,
             originalStream: state => state.originalStream,
+            microphoneInputLevel: state => state.microphoneInputLevel,
+            speakerVolume: state => state.speakerVolume,
             callStatus: state => state.callStatus,
-            callTime: state => state.callTime
+            callTime: state => state.callTime,
+            callMetrics: state => state.callMetrics
         },
         actions: {
             async _addCall({commit, getters, dispatch}, session) {
@@ -414,6 +458,16 @@ function initStoreModule(options) {
             _setOriginalStream({commit}, stream) {
                 commit(STORE_MUTATION_TYPES.SET_ORIGINAL_STREAM, stream);
             },
+            setMicrophoneInputLevel({dispatch, commit, getters}, value) {
+                commit(STORE_MUTATION_TYPES.SET_MICROPHONE_INPUT_LEVEL, value);
+                dispatch('_roomReconfigure', getters.getCurrentActiveRoomId)
+            },
+            setSpeakerVolume({commit, getters}, value) {
+                commit(STORE_MUTATION_TYPES.SET_SPEAKER_VOLUME, value);
+                Object.values(activeCalls).forEach((call) => {
+                    call.audioTag.volume = getters.speakerVolume
+                })
+            },
             muteCaller({commit, getters, dispatch}, {callId, value}) {
                 const call = activeCalls[callId];
 
@@ -469,9 +523,10 @@ function initStoreModule(options) {
                         console.error(err)
                     }
                     if (callsInRoom[0].connection && callsInRoom[0].connection.getSenders()[0]) {
-                        stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
-                        dispatch('_setOriginalStream', stream);
-                        await callsInRoom[0].connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
+                        const processedStream = processAudioVolume(stream, getters.microphoneInputLevel)
+                        processedStream.getTracks().forEach(track => track.enabled = !getters.isMuted)
+                        dispatch('_setOriginalStream', processedStream);
+                        await callsInRoom[0].connection.getSenders()[0].replaceTrack(processedStream.getTracks()[0]);
                         dispatch('_muteReconfigure', callsInRoom[0]);
                     }
                 } else if (callsInRoom.length > 1) {
@@ -523,9 +578,10 @@ function initStoreModule(options) {
                     if (sessions[0].roomId === getters.getCurrentActiveRoomId) {
                         // Mixing your voice with all the received audio
                         const stream = await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
-                        stream.getTracks().forEach(track => track.enabled = !getters.isMuted);
-                        dispatch('_setOriginalStream', stream);
-                        const sourceStream = audioContext.createMediaStreamSource(stream);
+                        const processedStream = processAudioVolume(stream, getters.microphoneInputLevel)
+                        processedStream.getTracks().forEach(track => track.enabled = !getters.isMuted);
+                        dispatch('_setOriginalStream', processedStream);
+                        const sourceStream = audioContext.createMediaStreamSource(processedStream);
 
                         // stream.getTracks().forEach(track => track.enabled = !getters.isMuted) // TODO: Fix this
 
@@ -556,6 +612,12 @@ function initStoreModule(options) {
                         && call.status === CONSTRAINTS.CALL_STATUS_UNANSWERED
                 }).forEach(call => dispatch('callTerminate', call._id));
             },
+            async updateDeviceList({commit, dispatch, getters}) {
+                await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
+                const devices = await navigator.mediaDevices.enumerateDevices();
+
+                commit(STORE_MUTATION_TYPES.SET_MEDIA_DEVICES, devices);
+            },
             async setMediaDevices({commit, dispatch, getters}, setDefaults = false) {
                 await navigator.mediaDevices.getUserMedia(getters.getUserMediaConstraints);
                 const devices = await navigator.mediaDevices.enumerateDevices();
@@ -577,6 +639,8 @@ function initStoreModule(options) {
                     return
                 }
 
+                commit(STORE_MUTATION_TYPES.SET_SELECTED_INPUT_DEVICE, dId);
+
                 let stream = null;
 
                 try {
@@ -584,8 +648,6 @@ function initStoreModule(options) {
                 } catch (err) {
                     console.error(err);
                 }
-
-                commit(STORE_MUTATION_TYPES.SET_SELECTED_INPUT_DEVICE, dId);
 
                 if (Object.keys(getters.getActiveCalls).length === 0) {
                     return;
@@ -595,9 +657,10 @@ function initStoreModule(options) {
 
                 if (callsInCurrentRoom.length === 1) {
                     Object.values(activeCalls).forEach(call => {
-                        stream.getTracks().forEach(track => track.enabled = !getters.isMuted)
-                        dispatch('_setOriginalStream', stream);
-                        call.connection.getSenders()[0].replaceTrack(stream.getTracks()[0]);
+                        const processedStream = processAudioVolume(stream, getters.microphoneInputLevel)
+                        processedStream.getTracks().forEach(track => track.enabled = !getters.isMuted)
+                        dispatch('_setOriginalStream', processedStream);
+                        call.connection.getSenders()[0].replaceTrack(processedStream.getTracks()[0]);
                         dispatch('_muteReconfigure', call);
                         commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                     });
@@ -675,7 +738,7 @@ function initStoreModule(options) {
                 }
 
                 call.connection.addEventListener('addstream', event => {
-                    syncStream(event, call, getters.getSelectedOutputDevice);
+                    syncStream(event, call, getters.getSelectedOutputDevice, getters.speakerVolume);
                     dispatch('_getCallQuality', call);
 
                     commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
@@ -753,7 +816,7 @@ function initStoreModule(options) {
                 dispatch('setCurrentActiveRoom', call.roomId);
 
                 call.connection.addEventListener('addstream', event => {
-                    syncStream(event, call, getters.getSelectedOutputDevice);
+                    syncStream(event, call, getters.getSelectedOutputDevice, getters.speakerVolume);
                     dispatch('_getCallQuality', call);
                     commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
                 });
@@ -764,13 +827,23 @@ function initStoreModule(options) {
                     cid: call._id
                 });
 
+                let inboundKeys = []
+                let inboundAudio
                 probe.onreport = (probe) => {
-                    const values = Object.values(probe.audio).map((audio) => {
-                        return audio.mos_in ? audio.mos_in : audio.mos_out
+                    const inboundMetrics = Object.entries(probe.audio).filter(([key, value]) => {
+                        return value.direction === "inbound"
                     })
-                    const minValue = Math.min(...values)
-                    call.audioQuality = minValue
-                    commit(STORE_MUTATION_TYPES.UPDATE_CALL, call);
+                    inboundMetrics.forEach(([key, value]) => {
+                        if (!inboundKeys.includes(key)) {
+                            inboundKeys.push(key)
+                            inboundAudio = key
+                        }
+                    });
+
+                    const inboundAudioMetric = probe.audio[inboundAudio]
+                    const metrics = filterObjectkeys(inboundAudioMetric, METRIC_KEYS_TO_INCLUDE)
+                    metrics.callId = call._id
+                    commit(STORE_MUTATION_TYPES.SET_CALL_METRICS, metrics);
                 };
 
                 dispatch('subscribe', {type: CALL_EVENT_LISTENER_TYPE.CALL_ENDED, listener: (session) => {
@@ -822,6 +895,7 @@ function initStoreModule(options) {
                             dispatch('_activeCallListRemove', session);
                             dispatch('_stopCallTimer', session._id);
                             commit(STORE_MUTATION_TYPES.REMOVE_CALL_STATUS, session._id);
+                            commit(STORE_MUTATION_TYPES.REMOVE_CALL_METRICS, session._id);
                         };
                         session._events.progress = function (event) {
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_PROGRESS, session, event});
@@ -836,6 +910,7 @@ function initStoreModule(options) {
                             dispatch('_activeCallListRemove', session);
                             dispatch('_stopCallTimer', session._id);
                             commit(STORE_MUTATION_TYPES.REMOVE_CALL_STATUS, session._id);
+                            commit(STORE_MUTATION_TYPES.REMOVE_CALL_METRICS, session._id);
                         };
                         session._events.confirmed = function (event) {
                             dispatch('_triggerListener', {listenerType: CALL_EVENT_LISTENER_TYPE.CALL_CONFIRMED, session, event});
