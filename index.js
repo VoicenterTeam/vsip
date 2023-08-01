@@ -747,11 +747,21 @@ function initStoreModule(options) {
                 const activeRoomId = getters.getCurrentActiveRoomId
 
                 if (!getters._uaInit) {
-                    return console.error('Run init action first');
+                    const message = 'Run init action first'
+                    console.error(message);
+                    return {
+                        message,
+                        messageType: 'error'
+                    }
                 }
 
                 if (target.toString().length === 0) {
-                    return console.error('Target must be passed');
+                    const message = 'Target must be passed'
+                    console.error(message);
+                    return {
+                        message,
+                        messageType: 'error'
+                    }
                 }
 
                 const call = UA.call(`sip:${target}@${getters.getSipDomain}`, getters.getSipOptions);
@@ -764,6 +774,11 @@ function initStoreModule(options) {
                 call.connection.addEventListener('addstream', async event => {
                     dispatch('_triggerAddStream', {event, call});
                 })
+
+                return {
+                    target,
+                    callId: call._id
+                }
             },
             callTerminate(context, callId) {
                 const call = activeCalls[callId];
