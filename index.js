@@ -917,7 +917,7 @@ function initStoreModule(options) {
                 listeners.push({
                     name: 'newRTCSession',
                     cb: ({session}) => {
-                        if (getters.isDND) {
+                        if (getters.isDND && session.direction === CONSTRAINTS.CALL_DIRECTION_INCOMING) {
                             session.terminate({status_code: 486, reason_phrase: "Do Not Disturb"})
                             return
                         }
