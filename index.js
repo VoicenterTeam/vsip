@@ -641,6 +641,13 @@ function initStoreModule(options) {
 
                 dispatch('setMicrophone', defaultMicrophone);
                 dispatch('setSpeaker', defaultSpeaker);
+
+                navigator.mediaDevices.addEventListener(
+                    'devicechange',
+                    () => {
+                        dispatch('updateDeviceList')
+                    }
+                )
             },
             async setMicrophone({commit, getters, dispatch}, dId) {
                 if (!getters.getInputDeviceList.find(({deviceId}) => deviceId === dId)) {
@@ -864,6 +871,7 @@ function initStoreModule(options) {
                 let inboundKeys = []
                 let inboundAudio
                 probe.onreport = (probe) => {
+                    //console.log('probe', probe)
                     const inboundMetrics = Object.entries(probe.audio).filter(([key, value]) => {
                         return value.direction === "inbound"
                     })

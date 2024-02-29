@@ -287,7 +287,7 @@ export default class Collector {
 
   async registerToPCEvents() {
     const { pc } = this._config;
-    navigator.mediaDevices.ondevicechange = async () => {
+    /*navigator.mediaDevices.ondevicechange = async () => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         this.addCustomEvent(
@@ -300,7 +300,25 @@ export default class Collector {
       } catch (err) {
         error(this._moduleName, "can't get devices");
       }
-    };
+    };*/
+    navigator.mediaDevices.addEventListener(
+        'devicechange',
+        async () => {
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            this.addCustomEvent(
+                new Date().toJSON(),
+                "device",
+                `${devices.length} devices found`,
+                "Media Devices state",
+            );
+            // eslint-disable-next-line no-empty
+          } catch (err) {
+            error(this._moduleName, "can't get devices");
+          }
+        }
+    )
+
     if (pc) {
       pc.oniceconnectionstatechange = () => {
         const value = pc.iceConnectionState;
